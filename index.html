@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Diagnosing ML Model Bias at Production Scale · Astha Jain</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+/* ── Design tokens ────────────────────────────────────────── */
+:root{
+  --s0:#f9f9f7;--s1:#fcfcfb;--ink:#0b0b0b;--sec:#52514e;--muted:#898781;
+  --grid:#e1e0d9;--border:rgba(11,11,11,.10);
+  --blue:#6366f1;--orange:#eb6834;--aqua:#1baf7a;--yellow:#eda100;
+  --pink:#e87ba4;--violet:#4a3aa7;
+  --good:#0ca30c;--warn:#fab219;--crit:#d03b3b;
+}
+
+/* ── Reset & base ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;background:var(--s0);color:var(--ink);min-height:100vh;}
+
+/* ── Sticky nav ───────────────────────────────────────────── */
+.snav{position:sticky;top:0;z-index:200;background:rgba(249,249,247,.97);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:center;gap:6px;height:48px;}
+.snav-brand{font-size:13px;font-weight:800;color:#0f172a;text-decoration:none;margin-right:16px;white-space:nowrap;}
+.snav-brand span{color:var(--blue);}
+.snav-items{display:flex;align-items:center;gap:2px;flex:1;}
+.snav-link{padding:5px 10px;border-radius:5px;font-size:12px;font-weight:500;color:#475569;text-decoration:none;white-space:nowrap;transition:background .12s,color .12s;}
+.snav-link:hover{background:rgba(99,102,241,.07);color:#0f172a;}
+.sndrop{position:relative;}
+.sndrop-btn{padding:5px 10px;border-radius:5px;font-size:12px;font-weight:500;color:#475569;background:none;border:none;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px;transition:background .12s,color .12s;}
+.sndrop-btn:hover{background:rgba(99,102,241,.07);color:#0f172a;}
+.sndrop-btn::after{content:"▾";font-size:10px;opacity:.6;}
+.sndrop-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.10);min-width:260px;padding:6px;z-index:300;}
+.sndrop:hover .sndrop-menu{display:block;}
+.sndrop-item{display:block;padding:7px 12px;border-radius:5px;font-size:12px;color:#475569;text-decoration:none;transition:background .1s,color .1s;}
+.sndrop-item:hover{background:rgba(99,102,241,.07);color:#0f172a;}
+.sndrop-item.active{color:var(--blue);font-weight:600;}
+.sndrop-divider{height:1px;background:var(--grid);margin:4px 0;}
+.snav-right{margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.snav-badge{padding:4px 12px;border-radius:5px;font-size:11px;font-weight:600;border:1px solid #e2e8f0;color:#475569;text-decoration:none;transition:border-color .12s,color .12s,background .12s;}
+.snav-badge:hover{background:#eef2ff;border-color:var(--blue);color:var(--blue);}
+
+/* ── Banners ──────────────────────────────────────────────── */
+.conf-banner{background:#eff6ff;border-bottom:1px solid #3b82f6;padding:7px 20px;font-size:11px;color:#1e40af;font-weight:500;text-align:center;}
+.demo-banner{background:#fffbeb;border-bottom:2px solid #f59e0b;padding:8px 20px;font-size:12px;font-weight:600;color:#92400e;display:flex;align-items:center;gap:8px;}
+.demo-banner .db-right{margin-left:auto;font-weight:400;color:#78350f;font-size:11px;}
+
+/* ── Article layout ───────────────────────────────────────── */
+.article-container{max-width:760px;margin:0 auto;padding:40px 24px;}
+.article-tag{display:inline-flex;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;background:rgba(99,102,241,.12);color:var(--blue);}
+.article-title{font-size:clamp(28px,5vw,40px);font-weight:800;line-height:1.1;letter-spacing:-.02em;color:var(--ink);margin:16px 0;}
+.article-meta{font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap;padding-bottom:24px;border-bottom:1px solid var(--grid);}
+.tldr-box{background:#f0f0fd;border-left:3px solid var(--blue);border-radius:8px;padding:20px 24px;margin:32px 0;}
+.tldr-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);margin-bottom:8px;}
+.article-body{font-size:15px;line-height:1.8;color:var(--sec);}
+.section-heading{font-size:22px;font-weight:800;color:var(--ink);margin:48px 0 16px;letter-spacing:-.02em;}
+.section-num{color:var(--blue);}
+.pull-quote{font-size:19px;font-weight:700;line-height:1.45;color:var(--ink);border-left:3px solid var(--blue);padding:16px 24px;margin:32px 0;background:#f8f9ff;border-radius:0 8px 8px 0;font-style:italic;}
+.callout-box{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin:24px 0;}
+.callout-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--orange);margin-bottom:8px;}
+.framework-steps{display:flex;flex-direction:column;gap:14px;margin:24px 0;}
+.step{display:flex;gap:14px;align-items:flex-start;}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;}
+.step-title{font-weight:700;color:var(--ink);font-size:14px;margin-bottom:3px;}
+.step-desc{font-size:13px;color:var(--sec);line-height:1.55;}
+.key-takeaways{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:24px;margin-top:48px;}
+.takeaway-item{display:flex;gap:12px;margin-bottom:12px;font-size:14px;color:var(--sec);}
+.takeaway-num{font-weight:800;color:var(--blue);min-width:20px;}
+.chart-embed{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:16px;margin:28px 0;}
+.chart-embed .ce-title{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:3px;}
+.chart-embed .ce-sub{font-size:11px;color:var(--muted);margin-bottom:12px;}
+.chart-embed canvas{max-height:220px;}
+p{margin-bottom:16px;}
+
+/* ── Evidence list ────────────────────────────────────────── */
+.evidence-list{padding-left:0;list-style:none;margin:16px 0;}
+.evidence-list li{padding:8px 0 8px 20px;border-bottom:1px solid var(--grid);font-size:14px;color:var(--sec);line-height:1.6;position:relative;}
+.evidence-list li::before{content:"→";position:absolute;left:0;color:var(--blue);font-weight:700;}
+.evidence-list li:last-child{border-bottom:none;}
+
+/* ── KPI strip ────────────────────────────────────────────── */
+.kpi-strip{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0;}
+.kpi-pill{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:12px 18px;flex:1;min-width:140px;}
+.kpi-pill-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+.kpi-pill-value{font-size:22px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;}
+.kpi-pill-sub{font-size:11px;color:var(--sec);margin-top:2px;}
+.kpi-pill.accent-blue{border-left:3px solid var(--blue);}
+.kpi-pill.accent-crit{border-left:3px solid var(--crit);}
+.kpi-pill.accent-good{border-left:3px solid var(--good);}
+.kpi-pill.accent-orange{border-left:3px solid var(--orange);}
+
+/* ── Footer ───────────────────────────────────────────────── */
+.page-footer{margin-top:48px;padding:20px 24px;border-top:1px solid var(--grid);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:16px;flex-wrap:wrap;max-width:760px;margin-left:auto;margin-right:auto;}
+.page-footer a{color:var(--blue);text-decoration:none;}
+.page-footer a:hover{text-decoration:underline;}
+
+/* ── Responsive ───────────────────────────────────────────── */
+@media(max-width:600px){
+  .article-container{padding:28px 16px;}
+  .pull-quote{font-size:16px;}
+  .kpi-strip{flex-direction:column;}
+}
+</style>
+</head>
+<body>
+
+<!-- ── Shared nav ─────────────────────────────────────────── -->
+<nav class="snav">
+  <a href="https://asthaj12.github.io" class="snav-brand">AJ<span> · Portfolio</span></a>
+  <div class="snav-items">
+    <div class="sndrop">
+      <button class="sndrop-btn">Case Studies</button>
+      <div class="sndrop-menu">
+        <a class="sndrop-item" href="https://asthaj12.github.io/forecast-governance/">Forecast Governance &amp; Decision Control</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/seasonal-planning/">Seasonal Planning Engine</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/pricing-demand-response/">Pricing &amp; Demand Response</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/npi-launch-planning/">NPI Launch Planning</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/fom-backtesting/">FOM 3.0 Backtesting</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/seasonal-event-intelligence/">Seasonal Event Intelligence</a>
+        <a class="sndrop-item" href="https://asthaj12.github.io/snap-monitoring/">SNAP Eligibility Monitor</a>
+        <div class="sndrop-divider"></div>
+        <a class="sndrop-item active" href="https://asthaj12.github.io/ml-model-diagnosis/">ML Model Diagnosis &#10003;</a>
+      </div>
+    </div>
+    <a class="snav-link" href="https://asthaj12.github.io#projects">Projects</a>
+    <a class="snav-link" href="https://asthaj12.github.io#skills">Skills</a>
+  </div>
+  <div class="snav-right">
+    <a class="snav-badge" href="https://linkedin.com/in/asthajain12" target="_blank">LinkedIn &#8599;</a>
+    <a class="snav-badge" href="https://github.com/asthaj12" target="_blank">GitHub &#8599;</a>
+  </div>
+</nav>
+
+<!-- ── Confidentiality banner ─────────────────────────────── -->
+<div class="conf-banner">
+  &#128274; Independent portfolio case study. All data, store identifiers, item identifiers, operating assumptions, and results shown here are synthetic or materially transformed. This project does not reproduce any employer's data, systems, models, or confidential business processes.
+</div>
+
+<!-- ── Demo banner ───────────────────────────────────────── -->
+<div class="demo-banner">
+  &#9888; Demo Data &mdash; Illustrative numbers only. Structure and methodology are real; all figures are synthetic.
+  <span class="db-right">Story 10 &mdash; ML Systems &middot; Demand Planning &middot; GBM Bias Diagnosis</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     ARTICLE
+═══════════════════════════════════════════════════════════ -->
+<article class="article-container">
+
+  <!-- Article header -->
+  <div>
+    <span class="article-tag">Technical &middot; ML Systems &middot; Demand Planning</span>
+    <h1 class="article-title">Diagnosing ML Model Bias at Production Scale: A Practitioner's Framework</h1>
+    <div class="article-meta">
+      <span>Author: Astha Jain</span>
+      <span>Reading time: ~7 min</span>
+      <span>Machine Learning &middot; Demand Forecasting &middot; Model Debugging</span>
+    </div>
+  </div>
+
+  <!-- KPI strip -->
+  <div class="kpi-strip">
+    <div class="kpi-pill accent-blue">
+      <div class="kpi-pill-label">Demand Repositioned</div>
+      <div class="kpi-pill-value">~$17M</div>
+      <div class="kpi-pill-sub">6.6M units &times; ~$2.60 blended AUR</div>
+    </div>
+    <div class="kpi-pill accent-crit">
+      <div class="kpi-pill-label">Aggregate Bias Hidden</div>
+      <div class="kpi-pill-value">&minus;10.2%</div>
+      <div class="kpi-pill-sub">Persistent negative bias in tail</div>
+    </div>
+    <div class="kpi-pill accent-orange">
+      <div class="kpi-pill-label">Missed Units</div>
+      <div class="kpi-pill-value">6.6M</div>
+      <div class="kpi-pill-sub">12-week measurement window</div>
+    </div>
+    <div class="kpi-pill accent-good">
+      <div class="kpi-pill-label">Time to Ship Fix</div>
+      <div class="kpi-pill-value">3 wks</div>
+      <div class="kpi-pill-sub">vs. 2+ quarter full rebuild</div>
+    </div>
+  </div>
+
+  <!-- TL;DR -->
+  <div class="tldr-box">
+    <div class="tldr-label">TL;DR</div>
+    <p style="font-size:14px;line-height:1.75;color:var(--sec);margin:0;">Aggregate model metrics lie. When a production GBM forecasting model showed acceptable aggregate sMAPE while systematically under-serving 6.6M units of dairy demand per quarter, the diagnosis required going below the aggregate &mdash; decomposing to store-item-day level to isolate the failure. This paper documents the diagnostic framework, the evidence standard required to prove "model error vs. data error," and how to scope a minimum viable fix that Engineering can ship in weeks rather than quarters.</p>
+  </div>
+
+  <!-- ── Article body ────────────────────────────────────── -->
+  <div class="article-body">
+
+    <!-- SECTION 1 -->
+    <h2 class="section-heading"><span class="section-num">1. </span>The Aggregation Trap</h2>
+
+    <p>Most ML model monitoring operates at the aggregate level because that's where dashboards live. Aggregate sMAPE is a clean metric. Stakeholders understand it. It shows up in review decks and executive summaries and weekly status emails. But it's deeply susceptible to a specific failure mode: a small number of high-volume items with severe negative bias can be drowned out by thousands of small-volume items that forecast correctly. The net aggregate looks fine. The supply chain doesn't.</p>
+
+    <p>In this case, the milk forecasting model &mdash; a production GBM (Gradient Boosting Machine) &mdash; was reporting an aggregate sMAPE of 14.2%. For dairy, that's within acceptable operating range. No alerts fired. No escalations triggered. And yet, when the same data was decomposed to the store-item level, the bottom 8% of items by forecast accuracy showed a persistent negative bias of &minus;10.2%. The items in that tail weren't random low-volume noise &mdash; they were the highest-velocity SKUs in the category. Whole milk gallons. Great Value half-gallons. The staples that anchor entire grocery trips.</p>
+
+    <div class="callout-box">
+      <div class="callout-label">Why High-Velocity Items Are Worst</div>
+      <p style="font-size:13px;color:var(--sec);margin:0;line-height:1.65;">High-velocity items have the least forecast buffer. A 10% underforecast on a 100-unit/store/week SKU means 10 units of missed demand &mdash; per store, per week. At 3,000 stores, that's 30,000 units per week of structural underserving. The model was quietly compounding this error across every week, every store, every replenishment cycle &mdash; invisible at the aggregate level, catastrophic at the supply chain level.</p>
+    </div>
+
+    <div class="pull-quote">
+      "The model was right on average in the same way you can drown in a river with an average depth of 2 feet. The variance matters, and the variance had a systematic pattern."
+    </div>
+
+    <p>The chart below shows the aggregation trap in action. Each bar represents a different level of measurement. The aggregate and median look acceptable by any standard monitoring threshold. Only when you decompose to the tail &mdash; the top-velocity decile and the lowest-accuracy decile &mdash; does the true failure become visible.</p>
+
+    <!-- Chart 1 -->
+    <div class="chart-embed">
+      <div class="ce-title">Chart 1 &mdash; The Aggregation Trap in Action</div>
+      <div class="ce-sub">sMAPE at four measurement levels. Aggregate hides the tail failure entirely.</div>
+      <canvas id="ch1-aggregation"></canvas>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2 class="section-heading"><span class="section-num">2. </span>Establishing the Diagnostic Standard &mdash; Model vs. Data</h2>
+
+    <p>Before you can claim "the model is wrong," you must rule out data problems. This is not a bureaucratic hurdle &mdash; it's the difference between credibility and noise. Three alternative explanations exist for persistent underforecasting, and each must be eliminated with evidence, not assumption.</p>
+
+    <ul class="evidence-list">
+      <li><strong>Actual stockouts:</strong> The model sees depressed demand signal because product was unavailable. If items were out-of-stock, the sales signal is naturally lower &mdash; and a "bias" in that direction isn't model error, it's reality. Control for stockouts by filtering to only store-weeks with confirmed in-stock. If bias persists, stockouts are not the cause.</li>
+      <li><strong>Data pipeline issues:</strong> The model is receiving incorrect on-hand or sales data. Cross-reference against point-of-sale raw data, not aggregated demand signal. If raw POS matches the pipeline input, the pipeline is clean.</li>
+      <li><strong>True model error:</strong> The GBM configuration is systematically wrong for this population. This is the residual claim &mdash; the explanation you can assert only after the first two are eliminated.</li>
+    </ul>
+
+    <div class="callout-box">
+      <div class="callout-label">The Evidence Standard</div>
+      <p style="font-size:13px;color:var(--sec);margin:0;line-height:1.65;">Don't claim model error until you've explicitly controlled for stockout-driven signal loss. It's the most common alternative explanation and the most politically sensitive &mdash; blaming inventory availability rather than the model. Skipping this step means your diagnosis will be challenged at the first stakeholder review. Do the control analysis before the conversation, not during it.</p>
+    </div>
+
+    <p>In this case: stockout-controlled analysis was run at the store-item-week level, filtering to in-stock observations only. The &minus;10.2% bias persisted unchanged. POS raw data was cross-referenced and matched the pipeline input exactly. Both alternative explanations were eliminated. The residual claim &mdash; model error &mdash; was now defensible.</p>
+
+    <p>The next question was persistence. Random model errors don't repeat. A model that's noisy will underforecast item A this week and overforecast it next week, and the residuals will have no temporal structure. Systematic model error is different: the same items are underforecast week after week, at the same stores. To test this, autocorrelation of forecast residuals was computed across lags 1 through 8 weeks. For a model with random errors, autocorrelation should hover near zero at all lags. For the GBM bottom decile: strong positive autocorrelation at lags 1 through 4. The same stores and items were staying wrong, repeatedly, in the same direction.</p>
+
+    <div class="pull-quote" style="display:none;">
+      <!-- No pull quote in section 2 per spec -->
+    </div>
+
+    <!-- Chart 2 -->
+    <div class="chart-embed">
+      <div class="ce-title">Chart 2 &mdash; Persistence Test: Bias Autocorrelation by Lag</div>
+      <div class="ce-sub">Random errors should autocorrelate near zero at all lags. The GBM bottom decile shows significant positive autocorrelation through week 4, confirming systematic, repeated failure at the same store-item combinations.</div>
+      <canvas id="ch2-autocorr"></canvas>
+    </div>
+
+    <!-- SECTION 3 -->
+    <h2 class="section-heading"><span class="section-num">3. </span>Decomposition to the Failure Level</h2>
+
+    <p>Once the diagnostic standard is met, the next question is: what exactly is wrong? "The model underforecasts milk" is not an actionable engineering brief. It is a starting point. The goal of decomposition is to find the failure at the level of specificity where Engineering can act on it &mdash; which means narrowing from category to subcategory to item tier to store cluster, until you've identified the precise intersection where the failure lives.</p>
+
+    <div class="pull-quote">
+      "Decomposition is not about finding the problem &mdash; it's about finding the problem at the level of specificity where Engineering can act on it. 'The model is wrong about milk' generates a 2-quarter rebuild. 'The dampening parameter is misconfigured for the 85th-percentile velocity bin in SNAP-dense stores' generates a 3-week config fix."
+    </div>
+
+    <p>The methodology: start broad at the category level, confirm the hypothesis holds, then narrow systematically. Each cut either confirms the failure pattern or eliminates a dimension, steering toward the real intersection.</p>
+
+    <div class="framework-steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>
+          <div class="step-title">Start at aggregate &mdash; confirm hypothesis</div>
+          <div class="step-desc">Verify bias is real and not explained by data artifacts. Establish aggregate sMAPE baseline for context.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>
+          <div class="step-title">Decompose by category &rarr; subcategory &rarr; item tier</div>
+          <div class="step-desc">Break milk into whole vs. reduced-fat vs. organic. Break by velocity tier (top quartile vs. bottom quartile). Identify which subcategories drive the aggregate failure.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>
+          <div class="step-title">Decompose by store cluster</div>
+          <div class="step-desc">High-SNAP stores vs. standard stores. SNAP benefit cycles create demand spikes on the 1st and 3rd of the month &mdash; test whether the model smooths over this pattern differentially by store type.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div>
+          <div class="step-title">Cross both dimensions to find the failure intersection</div>
+          <div class="step-desc">The two decomposition axes (item velocity tier &times; store cluster) are crossed. The failure intersection is where both conditions are true simultaneously.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div>
+          <div class="step-title">Quantify at the intersection, not at the aggregate</div>
+          <div class="step-desc">Compute the bias rate and unit impact within the intersection population specifically &mdash; not the full category. This is the number that goes into the business case.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div>
+          <div class="step-title">Confirm persistence at the intersection</div>
+          <div class="step-desc">Re-run the autocorrelation test on the intersection population only. Persistence must hold at the intersection, not just at the aggregate tail.</div>
+        </div>
+      </div>
+    </div>
+
+    <p>The failure pattern that emerged: underforecast was concentrated in items above the 85th velocity percentile <em>and</em> in stores with above-median SNAP benefit-cycle demand concentration. These stores experience a measurable demand spike on the 1st and 3rd of the month. The GBM model was smoothing over this within-month pattern &mdash; a known limitation of how item-level threshold configurations interact with benefit-cycle periodicity. The 6.6M units of missed demand is the product of the affected population at this intersection, multiplied by the weekly bias rate, measured over a 12-week window.</p>
+
+    <!-- Chart 3 -->
+    <div class="chart-embed">
+      <div class="ce-title">Chart 3 &mdash; Bias by Velocity Decile &times; Store Type</div>
+      <div class="ce-sub">Forecast bias (%) by item velocity decile, split by SNAP-dense vs. standard stores. The failure is concentrated at deciles 8&ndash;10 in SNAP-dense stores &mdash; the specific intersection where Engineering needs to act.</div>
+      <canvas id="ch3-decomp"></canvas>
+    </div>
+
+    <!-- SECTION 4 -->
+    <h2 class="section-heading"><span class="section-num">4. </span>Scoping the Minimum Viable Fix</h2>
+
+    <p>The most common mistake after a good diagnosis is over-prescribing the solution. A thorough diagnosis naturally generates awareness of all the model's limitations. The temptation is to fix them all. Resisting that temptation is as important as the diagnosis itself.</p>
+
+    <p>If the problem is a configuration parameter affecting 12% of items in 18% of stores, you don't need to rebuild the model. You need to fix the configuration for that population. The MVP fix identified here: update the item-level velocity threshold configuration for items above the 85th velocity percentile in SNAP-dense stores. This does not touch the model architecture. It does not require retraining. It can be deployed in days once Engineering validates the config change against the test population.</p>
+
+    <div class="callout-box">
+      <div class="callout-label">The Full Rebuild Trap</div>
+      <p style="font-size:13px;color:var(--sec);margin:0;line-height:1.65;">"While we're in there, let's also fix X, Y, Z" &mdash; this is the most dangerous sentence in the scoping conversation. It converts a 3-week config fix into a 2-quarter project. Every incremental scope addition is individually defensible. Together, they make the project unfeasible within the current cycle. Separate the diagnosis (done) from any broader improvement agenda. Write the broader agenda down. Put it in the backlog. Ship the bounded MVP first.</p>
+    </div>
+
+    <p>The asymmetric cost argument for acting now: milk is a basket-driving category. A customer who cannot find milk doesn't simply forgo milk &mdash; they switch their entire grocery trip to a competitor. The cost of a single missed trip far exceeds the cost of a corrected forecast. Being long on milk creates shrink, but shrink cost is bounded. Being short loses the basket entirely. The ongoing underforecast compounds daily. Every week the fix is deferred is another 550,000 units of structural underserving.</p>
+
+    <!-- Chart 4 -->
+    <div class="chart-embed">
+      <div class="ce-title">Chart 4 &mdash; Fix Scope vs. Timeline vs. Risk</div>
+      <div class="ce-sub">Three intervention options evaluated across affected item scope, implementation timeline, and deployment risk. The bounded MVP dominates on all three dimensions for this specific diagnosis.</div>
+      <canvas id="ch4-fix"></canvas>
+    </div>
+
+    <!-- SECTION 5 -->
+    <h2 class="section-heading"><span class="section-num">5. </span>The Engineering Handoff</h2>
+
+    <p>The practitioner's job doesn't end at diagnosis. It ends when Engineering can reproduce the finding, act on it, and measure whether the fix worked. Handing off "our forecast is underperforming" gives Engineering nowhere to start. Handing off a precisely defined failure population, a reproducible data query, a hypothesized configuration parameter, and a measurement plan gives Engineering everything they need to move without a second conversation.</p>
+
+    <div class="pull-quote">
+      "The practitioner who can speak both languages &mdash; translating 'this segment underforecasts by 10.2%' into 'this configuration parameter needs a new threshold at the 85th velocity percentile' &mdash; is 10&times; more valuable than one who can only report the problem."
+    </div>
+
+    <p>The four elements of a complete Engineering handoff:</p>
+
+    <ul class="evidence-list">
+      <li><strong>Reproducible query:</strong> A SQL query that produces the bias metric at the affected population. Engineering should be able to run it, get the same numbers, and know exactly what data is being measured.</li>
+      <li><strong>Precisely defined population:</strong> Items &ge; 85th velocity percentile in stores with &ge; median SNAP benefit-cycle demand concentration. Not "high-velocity items in SNAP stores." Exact thresholds, exact definitions.</li>
+      <li><strong>Hypothesized configuration parameter:</strong> The specific model configuration setting believed to drive the dampening behavior for this population. Engineering validates the hypothesis; the practitioner provides the starting point.</li>
+      <li><strong>Measurement plan:</strong> 6-week validation window, comparing bias before and after on the treated population vs. a held-out control group of equivalent stores. Success criterion: treated population bias converges from &minus;10.2% toward neutral. A/B test design specified in advance, not retrofitted after results arrive.</li>
+    </ul>
+
+    <p>What not to give Engineering: your opinion about what they should build next. That's a separate conversation, in a separate prioritization forum, with a separate stakeholder audience. Mixing the fix handoff with the broader roadmap conversation creates ambiguity about what's being committed and on what timeline. Keep the handoff clean. The fix is the fix.</p>
+
+    <div class="callout-box">
+      <div class="callout-label">Measurement Plan &mdash; Validation Design</div>
+      <p style="font-size:13px;color:var(--sec);line-height:1.65;margin:0;">
+        <strong>Window:</strong> 6 weeks post-deployment<br>
+        <strong>Treated group:</strong> Stores where config threshold is updated<br>
+        <strong>Control group:</strong> Matched holdout stores, same velocity and SNAP profile, config unchanged<br>
+        <strong>Primary metric:</strong> Forecast bias (%) at the affected population, treated vs. control<br>
+        <strong>Success threshold:</strong> Treated group bias moves from &minus;10.2% to within &minus;3% of neutral<br>
+        <strong>Secondary metric:</strong> In-stock rate at treated stores (no degradation vs. control)
+      </p>
+    </div>
+
+  </div><!-- /article-body -->
+
+  <!-- ── Key takeaways ──────────────────────────────────── -->
+  <div class="key-takeaways">
+    <div style="font-size:13px;font-weight:800;color:var(--ink);margin-bottom:16px;text-transform:uppercase;letter-spacing:.06em;">Key Takeaways</div>
+    <div class="takeaway-item">
+      <span class="takeaway-num">1</span>
+      <span>Aggregate metrics always look better than item-level metrics &mdash; never stop at the aggregate. sMAPE across all items will mask severe failure in the tail.</span>
+    </div>
+    <div class="takeaway-item">
+      <span class="takeaway-num">2</span>
+      <span>Establish the diagnostic standard before claiming model error. Rule out stockout-driven signal loss and data pipeline issues first. Both alternatives are more politically comfortable than model error &mdash; they will be offered as counterarguments.</span>
+    </div>
+    <div class="takeaway-item">
+      <span class="takeaway-num">3</span>
+      <span>Decompose to the exact failure intersection &mdash; category &times; velocity tier &times; store cluster. Category-level diagnosis generates category-level solutions. Item-tier &times; store-cluster diagnosis generates a scoped config fix.</span>
+    </div>
+    <div class="takeaway-item">
+      <span class="takeaway-num">4</span>
+      <span>Quantify at the intersection, not at the aggregate. The 6.6M units and ~$17M business case are intersection-level numbers. Aggregating them to the full category would both overstate the impacted population and understate the severity at the actual failure point.</span>
+    </div>
+    <div class="takeaway-item">
+      <span class="takeaway-num">5</span>
+      <span>Scope the minimum viable fix, not the ideal rebuild. The MVP fix ships in weeks; the rebuild ships in quarters. The basket-trip cost of delay compounds daily. Ship what's scoped; backlog what isn't.</span>
+    </div>
+    <div class="takeaway-item" style="margin-bottom:0;">
+      <span class="takeaway-num">6</span>
+      <span>The Engineering handoff requires translating demand language into engineering language &mdash; give them a reproducible query, a precisely defined population, a hypothesized configuration parameter, and a measurement plan. Four elements, no more, no less.</span>
+    </div>
+  </div>
+
+</article>
+
+<!-- ── Footer ─────────────────────────────────────────────── -->
+<footer class="page-footer">
+  <span>Astha Jain &middot; Portfolio</span>
+  <span>&middot;</span>
+  <a href="https://asthaj12.github.io">asthaj12.github.io</a>
+  <span>&middot;</span>
+  <a href="https://linkedin.com/in/asthajain12" target="_blank">LinkedIn</a>
+  <span style="margin-left:auto;">Story 10 &mdash; ML Model Diagnosis &middot; All data illustrative &middot; Synthetic figures only</span>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════
+     CHARTS
+═══════════════════════════════════════════════════════════ -->
+<script>
+/* ── Shared chart defaults ─────────────────────────── */
+Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+Chart.defaults.font.size = 11;
+Chart.defaults.color = '#898781';
+
+const BLUE   = '#6366f1';
+const ORANGE = '#eb6834';
+const AQUA   = '#1baf7a';
+const CRIT   = '#d03b3b';
+const MUTED  = '#c5c4bf';
+const GRID   = '#e1e0d9';
+
+function gridOpts() {
+  return { color: GRID, drawBorder: false };
+}
+function tickOpts() {
+  return { color: '#898781' };
+}
+
+/* ── Chart 1: Aggregation Trap ─────────────────────── */
+(function(){
+  const labels = [
+    'Aggregate sMAPE',
+    'Median Item sMAPE',
+    'Top-Velocity-Decile sMAPE',
+    'Bottom-10%-Accuracy sMAPE'
+  ];
+  const values = [14.2, 13.8, 24.1, 38.4];
+  const colors = [AQUA, AQUA, ORANGE, CRIT];
+
+  new Chart(document.getElementById('ch1-aggregation'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'sMAPE (%)',
+        data: values,
+        backgroundColor: colors,
+        borderRadius: 4,
+        barThickness: 28
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.x.toFixed(1)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: gridOpts(),
+          ticks: { ...tickOpts(), callback: v => v + '%' },
+          max: 45,
+          title: { display: true, text: 'sMAPE (%)', color: '#898781', font: { size: 10 } }
+        },
+        y: {
+          grid: { display: false },
+          ticks: { ...tickOpts(), font: { size: 10.5 } }
+        }
+      }
+    }
+  });
+
+  // Annotate with threshold reference line manually via plugin
+  const chart = Chart.getChart('ch1-aggregation');
+  if (chart) {
+    const plugin = {
+      id: 'thresholdLine',
+      afterDraw(chart) {
+        const { ctx, scales: { x } } = chart;
+        const xPos = x.getPixelForValue(18);
+        ctx.save();
+        ctx.strokeStyle = CRIT;
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(xPos, chart.chartArea.top);
+        ctx.lineTo(xPos, chart.chartArea.bottom);
+        ctx.stroke();
+        ctx.fillStyle = CRIT;
+        ctx.font = '10px system-ui';
+        ctx.fillText('Alert threshold 18%', xPos + 4, chart.chartArea.top + 12);
+        ctx.restore();
+      }
+    };
+    chart.options.plugins.thresholdLine = {};
+    chart.config.plugins = [plugin];
+    chart.update('none');
+  }
+})();
+
+/* ── Chart 2: Autocorrelation ──────────────────────── */
+(function(){
+  const lags = ['Lag 1','Lag 2','Lag 3','Lag 4','Lag 5','Lag 6','Lag 7','Lag 8'];
+  const random = [0.04, -0.02, 0.01, 0.03, -0.01, 0.02, -0.03, 0.01];
+  const gbm    = [0.72,  0.61,  0.48,  0.39,  0.18,  0.08,  0.05,  0.02];
+
+  new Chart(document.getElementById('ch2-autocorr'), {
+    type: 'line',
+    data: {
+      labels: lags,
+      datasets: [
+        {
+          label: 'Random error model',
+          data: random,
+          borderColor: MUTED,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [5, 4],
+          pointRadius: 3,
+          pointBackgroundColor: MUTED,
+          tension: 0.3
+        },
+        {
+          label: 'GBM bottom decile',
+          data: gbm,
+          borderColor: CRIT,
+          backgroundColor: 'rgba(208,59,59,.08)',
+          fill: true,
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: CRIT,
+          tension: 0.3
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 10.5 }, boxWidth: 14, padding: 14 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`
+          }
+        }
+      },
+      scales: {
+        x: { grid: gridOpts(), ticks: tickOpts() },
+        y: {
+          grid: gridOpts(),
+          ticks: { ...tickOpts(), callback: v => v.toFixed(1) },
+          min: -0.15,
+          max: 0.85,
+          title: {
+            display: true,
+            text: 'Autocorrelation coefficient',
+            color: '#898781',
+            font: { size: 10 }
+          }
+        }
+      }
+    }
+  });
+})();
+
+/* ── Chart 3: Bias by Velocity Decile × Store Type ── */
+(function(){
+  const deciles = ['D1','D2','D3','D4','D5','D6','D7','D8','D9','D10'];
+  const standard = [-0.8,-1.1,-1.4,-1.7,-2.0,-2.4,-2.8,-3.5,-4.2,-5.1];
+  const snapDense = [-1.0,-1.3,-1.7,-2.1,-2.7,-3.5,-4.8,-7.2,-9.1,-10.2];
+
+  new Chart(document.getElementById('ch3-decomp'), {
+    type: 'bar',
+    data: {
+      labels: deciles,
+      datasets: [
+        {
+          label: 'Standard stores',
+          data: standard,
+          backgroundColor: MUTED,
+          borderRadius: 3,
+          barPercentage: 0.8,
+          categoryPercentage: 0.7
+        },
+        {
+          label: 'SNAP-dense stores',
+          data: snapDense,
+          backgroundColor: CRIT,
+          borderRadius: 3,
+          barPercentage: 0.8,
+          categoryPercentage: 0.7
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 10.5 }, boxWidth: 14, padding: 14 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { ...tickOpts(), font: { size: 10.5 } },
+          title: {
+            display: true,
+            text: 'Velocity decile (D1=lowest, D10=highest)',
+            color: '#898781',
+            font: { size: 10 }
+          }
+        },
+        y: {
+          grid: gridOpts(),
+          ticks: { ...tickOpts(), callback: v => v + '%' },
+          max: 1,
+          title: {
+            display: true,
+            text: 'Forecast bias (%)',
+            color: '#898781',
+            font: { size: 10 }
+          }
+        }
+      }
+    }
+  });
+})();
+
+/* ── Chart 4: Fix Scope vs Timeline ────────────────── */
+(function(){
+  // Grouped horizontal bar: 3 options × 3 dimensions
+  // Normalize to a 0-100 scale for display:
+  // Scope: MVP=12%, Partial=100%, Full=100% → 12, 60, 100
+  // Timeline: MVP=3wk, Partial=8wk, Full=26+wk → normalize to 0-100
+  // Risk: low=20, medium=55, high=90
+
+  const options = ['Bounded MVP\nConfig Fix', 'Partial\nRetraining', 'Full Architecture\nRebuild'];
+  const scope    = [12,  60, 100];   // % items affected by fix
+  const timeline = [12,  31,  100];  // normalized weeks
+  const risk     = [20,  55,   90];  // normalized risk score
+
+  new Chart(document.getElementById('ch4-fix'), {
+    type: 'bar',
+    data: {
+      labels: options,
+      datasets: [
+        {
+          label: 'Item scope (% of category)',
+          data: scope,
+          backgroundColor: BLUE,
+          borderRadius: 3,
+          barPercentage: 0.75,
+          categoryPercentage: 0.65
+        },
+        {
+          label: 'Timeline (normalized)',
+          data: timeline,
+          backgroundColor: ORANGE,
+          borderRadius: 3,
+          barPercentage: 0.75,
+          categoryPercentage: 0.65
+        },
+        {
+          label: 'Deployment risk (normalized)',
+          data: risk,
+          backgroundColor: CRIT,
+          borderRadius: 3,
+          barPercentage: 0.75,
+          categoryPercentage: 0.65
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 10.5 }, boxWidth: 14, padding: 14 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const labels = [' 12% of items / 3 weeks / Low risk', ' 60% of items / 8 weeks / Medium risk', ' All items / 6+ months / High risk'];
+              const dim = ctx.datasetIndex;
+              const opt = ctx.dataIndex;
+              const raw = [
+                ['12% of items', '8 weeks', '6+ months'][opt] || '',
+                ['3 weeks',      '8 weeks', '26+ weeks'][opt] || '',
+                ['Low',          'Medium',  'High'][opt] || ''
+              ];
+              return ` ${['Scope','Timeline','Risk'][dim]}: ${raw[dim]}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: gridOpts(),
+          ticks: {
+            ...tickOpts(),
+            callback: v => v + '%'
+          },
+          max: 110,
+          title: {
+            display: true,
+            text: 'Normalized score (lower = better for all dimensions)',
+            color: '#898781',
+            font: { size: 10 }
+          }
+        },
+        y: {
+          grid: { display: false },
+          ticks: { ...tickOpts(), font: { size: 10.5 } }
+        }
+      }
+    }
+  });
+})();
+</script>
+
+</body>
+</html>
