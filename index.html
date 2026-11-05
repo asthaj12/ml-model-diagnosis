@@ -264,7 +264,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
 
     <p>Most ML model monitoring operates at the aggregate level because that's where dashboards live. Aggregate sMAPE is a clean metric. Stakeholders understand it. It shows up in review decks and executive summaries and weekly status emails. But it's deeply susceptible to a specific failure mode: a small number of high-volume items with severe negative bias can be drowned out by thousands of small-volume items that forecast correctly. The net aggregate looks fine. The supply chain doesn't.</p>
 
-    <p>In this case, the milk forecasting model &mdash; a production GBM (Gradient Boosting Machine) &mdash; was reporting an aggregate sMAPE of 14.2%. For dairy, that's within acceptable operating range. No alerts fired. No escalations triggered. And yet, when the same data was decomposed to the store-item level, the bottom 8% of items by forecast accuracy showed a persistent negative bias of &minus;10.2%. The items in that tail weren't random low-volume noise &mdash; they were the highest-velocity SKUs in the category. Whole milk gallons. Great Value half-gallons. The staples that anchor entire grocery trips.</p>
+    <p>In this case, the milk forecasting model &mdash; a production GBM (Gradient Boosting Machine) &mdash; was reporting an aggregate sMAPE of 14.2%. For dairy, that's within acceptable operating range. No alerts fired. No escalations triggered. And yet, when the same data was decomposed to the store-item level, the bottom 8% of items by forecast accuracy showed a persistent negative bias of &minus;10.2%. The items in that tail weren't random low-volume noise &mdash; they were the highest-velocity SKUs in the category. Whole milk gallons. Private-label half-gallons. The staples that anchor entire grocery trips.</p>
 
     <div class="callout-box">
       <div class="callout-label">Why High-Velocity Items Are Worst</div>
@@ -321,7 +321,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
     <p>Once the diagnostic standard is met, the next question is: what exactly is wrong? "The model underforecasts milk" is not an actionable engineering brief. It is a starting point. The goal of decomposition is to find the failure at the level of specificity where Engineering can act on it &mdash; which means narrowing from category to subcategory to item tier to store cluster, until you've identified the precise intersection where the failure lives.</p>
 
     <div class="pull-quote">
-      "Decomposition is not about finding the problem &mdash; it's about finding the problem at the level of specificity where Engineering can act on it. 'The model is wrong about milk' generates a 2-quarter rebuild. 'The dampening parameter is misconfigured for the 85th-percentile velocity bin in SNAP-dense stores' generates a 3-week config fix."
+      "Decomposition is not about finding the problem &mdash; it's about finding the problem at the level of specificity where Engineering can act on it. 'The model is wrong about milk' generates a 2-quarter rebuild. 'The dampening parameter is misconfigured for the 85th-percentile velocity bin in benefit-dense stores' generates a 3-week config fix."
     </div>
 
     <p>The methodology: start broad at the category level, confirm the hypothesis holds, then narrow systematically. Each cut either confirms the failure pattern or eliminates a dimension, steering toward the real intersection.</p>
@@ -345,7 +345,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
         <div class="step-num">3</div>
         <div>
           <div class="step-title">Decompose by store cluster</div>
-          <div class="step-desc">High-SNAP stores vs. standard stores. SNAP benefit cycles create demand spikes on the 1st and 3rd of the month &mdash; test whether the model smooths over this pattern differentially by store type.</div>
+          <div class="step-desc">High-benefit-density stores vs. standard stores. Benefit cycles create demand spikes on the 1st and 3rd of the month &mdash; test whether the model smooths over this pattern differentially by store type.</div>
         </div>
       </div>
       <div class="step">
@@ -371,12 +371,12 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
       </div>
     </div>
 
-    <p>The failure pattern that emerged: underforecast was concentrated in items above the 85th velocity percentile <em>and</em> in stores with above-median SNAP benefit-cycle demand concentration. These stores experience a measurable demand spike on the 1st and 3rd of the month. The GBM model was smoothing over this within-month pattern &mdash; a known limitation of how item-level threshold configurations interact with benefit-cycle periodicity. The 6.6M units of missed demand is the product of the affected population at this intersection, multiplied by the weekly bias rate, measured over a 12-week window.</p>
+    <p>The failure pattern that emerged: underforecast was concentrated in items above the 85th velocity percentile <em>and</em> in stores with above-median benefit-cycle demand concentration. These stores experience a measurable demand spike on the 1st and 3rd of the month. The GBM model was smoothing over this within-month pattern &mdash; a known limitation of how item-level threshold configurations interact with benefit-cycle periodicity. The 6.6M units of missed demand is the product of the affected population at this intersection, multiplied by the weekly bias rate, measured over a 12-week window.</p>
 
     <!-- Chart 3 -->
     <div class="chart-embed">
       <div class="ce-title">Chart 3 &mdash; Bias by Velocity Decile &times; Store Type</div>
-      <div class="ce-sub">Forecast bias (%) by item velocity decile, split by SNAP-dense vs. standard stores. The failure is concentrated at deciles 8&ndash;10 in SNAP-dense stores &mdash; the specific intersection where Engineering needs to act.</div>
+      <div class="ce-sub">Forecast bias (%) by item velocity decile, split by benefit-dense vs. standard stores. The failure is concentrated at deciles 8&ndash;10 in benefit-dense stores &mdash; the specific intersection where Engineering needs to act.</div>
       <canvas id="ch3-decomp"></canvas>
     </div>
 
@@ -385,7 +385,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
 
     <p>The most common mistake after a good diagnosis is over-prescribing the solution. A thorough diagnosis naturally generates awareness of all the model's limitations. The temptation is to fix them all. Resisting that temptation is as important as the diagnosis itself.</p>
 
-    <p>If the problem is a configuration parameter affecting 12% of items in 18% of stores, you don't need to rebuild the model. You need to fix the configuration for that population. The MVP fix identified here: update the item-level velocity threshold configuration for items above the 85th velocity percentile in SNAP-dense stores. This does not touch the model architecture. It does not require retraining. It can be deployed in days once Engineering validates the config change against the test population.</p>
+    <p>If the problem is a configuration parameter affecting 12% of items in 18% of stores, you don't need to rebuild the model. You need to fix the configuration for that population. The MVP fix identified here: update the item-level velocity threshold configuration for items above the 85th velocity percentile in benefit-dense stores. This does not touch the model architecture. It does not require retraining. It can be deployed in days once Engineering validates the config change against the test population.</p>
 
     <div class="callout-box">
       <div class="callout-label">The Full Rebuild Trap</div>
@@ -414,7 +414,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
 
     <ul class="evidence-list">
       <li><strong>Reproducible query:</strong> A SQL query that produces the bias metric at the affected population. Engineering should be able to run it, get the same numbers, and know exactly what data is being measured.</li>
-      <li><strong>Precisely defined population:</strong> Items &ge; 85th velocity percentile in stores with &ge; median SNAP benefit-cycle demand concentration. Not "high-velocity items in SNAP stores." Exact thresholds, exact definitions.</li>
+      <li><strong>Precisely defined population:</strong> Items &ge; 85th velocity percentile in stores with &ge; median benefit-cycle demand concentration. Not "high-velocity items in benefit-dense stores." Exact thresholds, exact definitions.</li>
       <li><strong>Hypothesized configuration parameter:</strong> The specific model configuration setting believed to drive the dampening behavior for this population. Engineering validates the hypothesis; the practitioner provides the starting point.</li>
       <li><strong>Measurement plan:</strong> 6-week validation window, comparing bias before and after on the treated population vs. a held-out control group of equivalent stores. Success criterion: treated population bias converges from &minus;10.2% toward neutral. A/B test design specified in advance, not retrofitted after results arrive.</li>
     </ul>
@@ -426,7 +426,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.open){dd
       <p style="font-size:13px;color:var(--sec);line-height:1.65;margin:0;">
         <strong>Window:</strong> 6 weeks post-deployment<br>
         <strong>Treated group:</strong> Stores where config threshold is updated<br>
-        <strong>Control group:</strong> Matched holdout stores, same velocity and SNAP profile, config unchanged<br>
+        <strong>Control group:</strong> Matched holdout stores, same velocity and benefit profile, config unchanged<br>
         <strong>Primary metric:</strong> Forecast bias (%) at the affected population, treated vs. control<br>
         <strong>Success threshold:</strong> Treated group bias moves from &minus;10.2% to within &minus;3% of neutral<br>
         <strong>Secondary metric:</strong> In-stock rate at treated stores (no degradation vs. control)
@@ -665,7 +665,7 @@ function tickOpts() {
           categoryPercentage: 0.7
         },
         {
-          label: 'SNAP-dense stores',
+          label: 'Benefit-dense stores',
           data: snapDense,
           backgroundColor: CRIT,
           borderRadius: 3,
